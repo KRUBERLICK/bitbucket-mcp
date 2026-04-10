@@ -31,3 +31,20 @@ security add-generic-password -a "$USER" -s "bitbucket-mcp-password" -w "API_TOK
 6. Далі при запуску `claude` всередині директорії проекту, перевірити статус mcp-сервера командою `/mcp`, у списку має бути `bitbucket` зі статусом `connected`.
 
 Для підключення mcp-сервера до інших проектів - просто скопіюйте файл `.mcp.json` у рут відповідного проекту та перезапустіть `claude`.
+
+## Приклади запитів
+
+Запит на виконання код-ревʼю вказаного PR:
+```
+Perform a comprehensive code review for PR #666, following the guidelines and style guides of the project, adding necesary comments in the corresponding places, highlighting possible issues or suggestions. Use real code suggestions in the comments when applicable. Then request changes if there are any issues or possible improvements that need to be addressed by the author.
+```
+
+Запит на аналіз коментарів до вказаного PR та виконання запропонованих змін:
+```
+Check the added comments to PR #666 and analyse their proposals. Identify the ones that make good point, indicating real issues or improvements that can be done. Plan the corresponding updates in the project.
+```
+
+Запит на закриття усіх відкритих до вказаного PR коментарів та апрув PR:
+```
+Resolve all my comments to PR #666 and approve the PR.
+```
