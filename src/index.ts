@@ -12,6 +12,7 @@ import winston from "winston";
 import os from "os";
 import path from "path";
 import fs from "fs";
+import { execSync } from "child_process";
 import {
   BitbucketPaginator,
   BITBUCKET_ALL_ITEMS_CAP,
@@ -486,6 +487,22 @@ class BitbucketServer {
     return false;
   }
 
+  private static readFromKeychain(service: string): string | undefined {
+    if (process.platform !== "darwin") {
+      return undefined;
+    }
+    try {
+      return execSync(
+        `security find-generic-password -a "${os.userInfo().username}" -s "${service}" -w`,
+        { stdio: ["pipe", "pipe", "pipe"] }
+      )
+        .toString()
+        .trim();
+    } catch {
+      return undefined;
+    }
+  }
+
   constructor() {
     // Initialize with the older Server class pattern
     this.server = new Server(
@@ -500,12 +517,16 @@ class BitbucketServer {
       }
     );
 
-    // Configuration from environment variables
+    // Configuration from environment variables, with macOS Keychain fallback
     const initialConfig: BitbucketConfig = {
       baseUrl: process.env.BITBUCKET_URL ?? "https://api.bitbucket.org/2.0",
       token: process.env.BITBUCKET_TOKEN,
-      username: process.env.BITBUCKET_USERNAME,
-      password: process.env.BITBUCKET_PASSWORD,
+      username:
+        process.env.BITBUCKET_USERNAME ??
+        BitbucketServer.readFromKeychain("bitbucket-mcp-username"),
+      password:
+        process.env.BITBUCKET_PASSWORD ??
+        BitbucketServer.readFromKeychain("bitbucket-mcp-password"),
       defaultWorkspace: process.env.BITBUCKET_WORKSPACE,
     };
 
@@ -787,6 +808,32 @@ class BitbucketServer {
           },
         },
         {
+          name: "finishReview",
+          description:
+            "Finish a pull request review by approving or requesting changes.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              workspace: {
+                type: "string",
+                description: "Bitbucket workspace name",
+              },
+              repo_slug: { type: "string", description: "Repository slug" },
+              pull_request_id: {
+                type: "string",
+                description: "Pull request ID",
+              },
+              state: {
+                type: "string",
+                enum: ["APPROVED", "CHANGES_REQUESTED"],
+                description:
+                  "Optional review verdict. Omit to publish comments without approving or requesting changes.",
+              },
+            },
+            required: ["workspace", "repo_slug", "pull_request_id"],
+          },
+        },
+        {
           name: "declinePullRequest",
           description: "Decline a pull request",
           inputSchema: {
@@ -914,7 +961,7 @@ class BitbucketServer {
               pending: {
                 type: "boolean",
                 description:
-                  "Whether to create this comment as a pending comment (draft state)",
+                  "Whether to create this comment as a pending (draft) comment. Pending comments are only visible to you and must be published manually via the Bitbucket website.",
               },
               inline: {
                 type: "object",
@@ -945,7 +992,7 @@ class BitbucketServer {
         {
           name: "addPendingPullRequestComment",
           description:
-            "Add a pending (draft) comment to a pull request that can be published later",
+            "Add a pending (draft) comment to a pull request. Pending comments are only visible to you and must be published manually via the Bitbucket website using the 'Finish Review' button.",
           inputSchema: {
             type: "object",
             properties: {
@@ -986,25 +1033,6 @@ class BitbucketServer {
               },
             },
             required: ["workspace", "repo_slug", "pull_request_id", "content"],
-          },
-        },
-        {
-          name: "publishPendingComments",
-          description: "Publish all pending comments for a pull request",
-          inputSchema: {
-            type: "object",
-            properties: {
-              workspace: {
-                type: "string",
-                description: "Bitbucket workspace name",
-              },
-              repo_slug: { type: "string", description: "Repository slug" },
-              pull_request_id: {
-                type: "string",
-                description: "Pull request ID",
-              },
-            },
-            required: ["workspace", "repo_slug", "pull_request_id"],
           },
         },
         {
@@ -1952,6 +1980,13 @@ class BitbucketServer {
               args.repo_slug as string,
               args.pull_request_id as string
             );
+          case "finishReview":
+            return await this.finishReview(
+              args.workspace as string,
+              args.repo_slug as string,
+              args.pull_request_id as string,
+              args.state as string | undefined
+            );
           case "declinePullRequest":
             return await this.declinePullRequest(
               args.workspace as string,
@@ -1998,7 +2033,7 @@ class BitbucketServer {
               args.pull_request_id as string,
               args.content as string,
               args.inline as InlineCommentInline,
-              args.pending as boolean
+              args.pending as boolean | undefined
             );
           case "addPendingPullRequestComment":
             return await this.addPendingPullRequestComment(
@@ -2007,12 +2042,6 @@ class BitbucketServer {
               args.pull_request_id as string,
               args.content as string,
               args.inline as InlineCommentInline
-            );
-          case "publishPendingComments":
-            return await this.publishPendingComments(
-              args.workspace as string,
-              args.repo_slug as string,
-              args.pull_request_id as string
             );
           case "getRepositoryBranchingModel":
             return await this.getRepositoryBranchingModel(
@@ -2547,11 +2576,14 @@ class BitbucketServer {
         workspace,
         repo_slug,
       });
+      const detail = axios.isAxiosError(error)
+        ? JSON.stringify(error.response?.data ?? error.message)
+        : error instanceof Error
+        ? error.message
+        : String(error);
       throw new McpError(
         ErrorCode.InternalError,
-        `Failed to create pull request: ${
-          error instanceof Error ? error.message : String(error)
-        }`
+        `Failed to create pull request: ${detail}`
       );
     }
   }
@@ -2709,7 +2741,8 @@ class BitbucketServer {
       });
 
       const response = await this.api.post(
-        `/repositories/${workspace}/${repo_slug}/pullrequests/${pull_request_id}/approve`
+        `/repositories/${workspace}/${repo_slug}/pullrequests/${pull_request_id}/approve`,
+        {}
       );
 
       return {
@@ -2772,6 +2805,66 @@ class BitbucketServer {
         `Failed to unapprove pull request: ${
           error instanceof Error ? error.message : String(error)
         }`
+      );
+    }
+  }
+
+  async finishReview(
+    workspace: string,
+    repo_slug: string,
+    pull_request_id: string,
+    state?: string
+  ) {
+    try {
+      logger.info("Finishing pull request review", {
+        workspace,
+        repo_slug,
+        pull_request_id,
+        state,
+      });
+
+      // For a verdict (approve/request-changes), use the public REST API.
+      if (state === "APPROVED" || state === "CHANGES_REQUESTED") {
+        const endpoint =
+          state === "APPROVED" ? "approve" : "request-changes";
+        const response = await this.api.post(
+          `/repositories/${workspace}/${repo_slug}/pullrequests/${pull_request_id}/${endpoint}`,
+          {}
+        );
+        return {
+          content: [{ type: "text", text: JSON.stringify(response.data, null, 2) }],
+        };
+      }
+
+      if (state && state !== "APPROVED" && state !== "CHANGES_REQUESTED") {
+        throw new McpError(
+          ErrorCode.InvalidParams,
+          `Invalid state '${state}'. Must be 'APPROVED' or 'CHANGES_REQUESTED'.`
+        );
+      }
+
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        "state is required. Provide 'APPROVED' to approve or 'CHANGES_REQUESTED' to request changes."
+      );
+    } catch (error) {
+      if (error instanceof McpError) {
+        throw error;
+      }
+      logger.error("Error finishing pull request review", {
+        error,
+        workspace,
+        repo_slug,
+        pull_request_id,
+      });
+      const detail = axios.isAxiosError(error)
+        ? `HTTP ${error.response?.status}: ${JSON.stringify(error.response?.data ?? error.message)}`
+        : error instanceof Error
+        ? error.message
+        : String(error);
+      throw new McpError(
+        ErrorCode.InternalError,
+        `Failed to finish review: ${detail}`
       );
     }
   }
@@ -2839,7 +2932,7 @@ class BitbucketServer {
       // Build request data
       const data: Record<string, any> = {};
       if (message) data.message = message;
-      if (strategy) data.merge_strategy = strategy;
+      if (strategy) data.merge_strategy = strategy.replace(/-/g, '_');
 
       const response = await this.api.post(
         `/repositories/${workspace}/${repo_slug}/pullrequests/${pull_request_id}/merge`,
@@ -3053,7 +3146,6 @@ class BitbucketServer {
         },
       };
 
-      // Add pending flag if provided
       if (pending !== undefined) {
         commentData.pending = pending;
       }
@@ -3100,6 +3192,23 @@ class BitbucketServer {
         }`
       );
     }
+  }
+
+  async addPendingPullRequestComment(
+    workspace: string,
+    repo_slug: string,
+    pull_request_id: string,
+    content: string,
+    inline?: InlineCommentInline
+  ) {
+    return this.addPullRequestComment(
+      workspace,
+      repo_slug,
+      pull_request_id,
+      content,
+      inline,
+      true
+    );
   }
 
   async getRepositoryBranchingModel(workspace: string, repo_slug: string) {
@@ -3381,148 +3490,6 @@ class BitbucketServer {
     }
   }
 
-  async addPendingPullRequestComment(
-    workspace: string,
-    repo_slug: string,
-    pull_request_id: string,
-    content: string,
-    inline?: InlineCommentInline
-  ) {
-    try {
-      logger.info("Adding pending comment to Bitbucket pull request", {
-        workspace,
-        repo_slug,
-        pull_request_id,
-        inline: inline ? "inline comment" : "general comment",
-      });
-
-      // Use the existing addPullRequestComment method with pending=true
-      return await this.addPullRequestComment(
-        workspace,
-        repo_slug,
-        pull_request_id,
-        content,
-        inline,
-        true // Set pending to true for draft comment
-      );
-    } catch (error) {
-      logger.error("Error adding pending comment to pull request", {
-        error,
-        workspace,
-        repo_slug,
-        pull_request_id,
-      });
-      throw new McpError(
-        ErrorCode.InternalError,
-        `Failed to add pending pull request comment: ${
-          error instanceof Error ? error.message : String(error)
-        }`
-      );
-    }
-  }
-
-  async publishPendingComments(
-    workspace: string,
-    repo_slug: string,
-    pull_request_id: string
-  ) {
-    try {
-      logger.info("Publishing pending comments for Bitbucket pull request", {
-        workspace,
-        repo_slug,
-        pull_request_id,
-      });
-
-      // First, get all pending comments for the pull request
-      const commentsResult = await this.paginator.fetchValues(
-        `/repositories/${workspace}/${repo_slug}/pullrequests/${pull_request_id}/comments`,
-        {
-          pagelen: BITBUCKET_MAX_PAGELEN,
-          all: true,
-          description: "publishPendingComments",
-        }
-      );
-
-      type PendingComment = {
-        id: number;
-        content: { raw?: string; html?: string; markup?: string };
-        inline?: InlineCommentInline;
-        pending?: boolean;
-      };
-
-      const comments = (commentsResult.values || []) as PendingComment[];
-      const pendingComments = comments.filter(
-        (comment: any) => comment.pending === true
-      ) as PendingComment[];
-
-      if (pendingComments.length === 0) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: "No pending comments found to publish.",
-            },
-          ],
-        };
-      }
-
-      // Publish each pending comment by updating it with pending=false
-      const publishResults = [];
-      for (const comment of pendingComments) {
-        try {
-          const updateResponse = await this.api.put(
-            `/repositories/${workspace}/${repo_slug}/pullrequests/${pull_request_id}/comments/${comment.id}`,
-            {
-              content: comment.content,
-              pending: false,
-              ...(comment.inline && { inline: comment.inline }),
-            }
-          );
-          publishResults.push({
-            commentId: comment.id,
-            status: "published",
-            data: updateResponse.data,
-          });
-        } catch (error) {
-          publishResults.push({
-            commentId: comment.id,
-            status: "error",
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }
-      }
-
-      return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(
-              {
-                message: `Published ${pendingComments.length} pending comments`,
-                results: publishResults,
-              },
-              null,
-              2
-            ),
-          },
-        ],
-      };
-    } catch (error) {
-      logger.error("Error publishing pending comments", {
-        error,
-        workspace,
-        repo_slug,
-        pull_request_id,
-      });
-      throw new McpError(
-        ErrorCode.InternalError,
-        `Failed to publish pending comments: ${
-          error instanceof Error ? error.message : String(error)
-        }`
-      );
-    }
-  }
-
   async createDraftPullRequest(
     workspace: string,
     repo_slug: string,
@@ -3558,11 +3525,14 @@ class BitbucketServer {
         workspace,
         repo_slug,
       });
+      const detail = axios.isAxiosError(error)
+        ? JSON.stringify(error.response?.data ?? error.message)
+        : error instanceof Error
+        ? error.message
+        : String(error);
       throw new McpError(
         ErrorCode.InternalError,
-        `Failed to create draft pull request: ${
-          error instanceof Error ? error.message : String(error)
-        }`
+        `Failed to create draft pull request: ${detail}`
       );
     }
   }
@@ -4500,7 +4470,7 @@ class BitbucketServer {
       }
 
       const response = resolved
-        ? await this.api.post(resolveUrl(targetCommentId))
+        ? await this.api.post(resolveUrl(targetCommentId), {})
         : await this.api.delete(resolveUrl(targetCommentId));
 
       const responseText =
