@@ -22,7 +22,11 @@
 ```
 1. У зклонованій директорії `bitbucket-mcp` виконати команду `npm install`.
 2. Далі за посиланням https://id.atlassian.com/manage-profile/security/api-tokens сформувати власний API token з наступними скоупами: `read:user:bitbucket`, `read:repository:bitbucket`, `read:pullrequest:bitbucket`, `write:pullrequest:bitbucket`, `read:pipeline:bitbucket`.
-3. Після цього даний токен необхідно додати у власний MacOS-кічейн, за допомогою наступної команди в терміналі: `security add-generic-password -a "$USER" -s "bitbucket-mcp" -w "YOUR_API_TOKEN"`, замінивши `YOUR_API_TOKEN` на згенерований токен.
+3. Після цього даний токен разом з вашим юзернеймом необхідно додати у власний MacOS-кічейн, за допомогою наступних команд в терміналі, замінивши `YOUR_EMAIL` та `API_TOKEN` на ваші значення:
+```bash
+security add-generic-password -a "$USER" -s "bitbucket-mcp-username" -w "YOUR_EMAIL"
+security add-generic-password -a "$USER" -s "bitbucket-mcp-password" -w "API_TOKEN"
+```
 5. Потім рекомендую повністю перезапустити додаток терміналу або iTerm.
 6. Далі при запуску `claude` всередині директорії проекту, перевірити статус mcp-сервера командою `/mcp`, у списку має бути `bitbucket` зі статусом `connected`.
 
