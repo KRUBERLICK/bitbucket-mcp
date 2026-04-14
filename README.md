@@ -12,9 +12,7 @@
       ],
       "env": {
         "BITBUCKET_URL": "https://api.bitbucket.org/2.0",
-        "BITBUCKET_WORKSPACE": "funplace",
-        "BITBUCKET_USERNAME": "${BITBUCKET_USERNAME}",
-        "BITBUCKET_PASSWORD": "${BITBUCKET_PASSWORD}"
+        "BITBUCKET_WORKSPACE": "funplace"
       }
     }
   }
