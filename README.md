@@ -20,7 +20,7 @@
   }
 }
 ```
-1. У зклонованій директорії `bitbucket-mcp` виконати команду `npm install`.
+1. У зклонованій директорії `bitbucket-mcp` виконати команду `npm install && npm run build`.
 2. Далі за посиланням https://id.atlassian.com/manage-profile/security/api-tokens сформувати власний API token з наступними скоупами: `read:user:bitbucket`, `read:repository:bitbucket`, `read:pullrequest:bitbucket`, `write:pullrequest:bitbucket`, `read:pipeline:bitbucket`.
 3. Після цього даний токен разом з вашим юзернеймом необхідно додати у власний MacOS-кічейн, за допомогою наступних команд в терміналі, замінивши `YOUR_EMAIL` та `API_TOKEN` на ваші значення:
 ```bash
