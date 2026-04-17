@@ -8,11 +8,12 @@
     "bitbucket": {
       "command": "node",
       "args": [
-        "PATH_TO_MCP_ROOT/dist/index.js"
+        "/Users/kruberlick/Documents/work/bitbucket-mcp/dist/index.js"
       ],
       "env": {
         "BITBUCKET_URL": "https://api.bitbucket.org/2.0",
-        "BITBUCKET_WORKSPACE": "funplace"
+        "BITBUCKET_WORKSPACE": "funplace",
+        "BITBUCKET_ENABLE_DANGEROUS": "true"
       }
     }
   }

@@ -963,6 +963,11 @@ class BitbucketServer {
                 description:
                   "Whether to create this comment as a pending (draft) comment. Pending comments are only visible to you and must be published manually via the Bitbucket website.",
               },
+              parent_id: {
+                type: "number",
+                description:
+                  "ID of the parent comment to reply to. When provided, this comment becomes a threaded reply within the parent comment's thread.",
+              },
               inline: {
                 type: "object",
                 description:
@@ -2033,7 +2038,8 @@ class BitbucketServer {
               args.pull_request_id as string,
               args.content as string,
               args.inline as InlineCommentInline,
-              args.pending as boolean | undefined
+              args.pending as boolean | undefined,
+              args.parent_id as number | undefined
             );
           case "addPendingPullRequestComment":
             return await this.addPendingPullRequestComment(
@@ -3129,7 +3135,8 @@ class BitbucketServer {
     pull_request_id: string,
     content: string,
     inline?: InlineCommentInline,
-    pending?: boolean
+    pending?: boolean,
+    parent_id?: number
   ) {
     try {
       logger.info("Adding comment to Bitbucket pull request", {
@@ -3148,6 +3155,10 @@ class BitbucketServer {
 
       if (pending !== undefined) {
         commentData.pending = pending;
+      }
+
+      if (parent_id !== undefined) {
+        commentData.parent = { id: parent_id };
       }
 
       // Add inline information if provided
